@@ -1,0 +1,15 @@
+# python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# experiment outputs (raw run records are large; summaries are committed explicitly)
+experiments/records/
+dataset/execution_records.json
+
+# os / editor
+.DS_Store
