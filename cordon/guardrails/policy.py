@@ -12,7 +12,7 @@ if the same plan also encrypts it.
 
 from typing import Callable
 
-from cordon.execution import normalize_action
+from cordon.execution import VALID_ENCRYPTION_TYPES, normalize_action
 from cordon.guardrails.base import BLOCK, LayerVerdict
 from cordon.schema import Plan, PlannedAction, Policy
 
@@ -50,8 +50,13 @@ def _rule_no_public_bucket(actions: list[PlannedAction]) -> bool:
 def _rule_bucket_must_encrypt(actions: list[PlannedAction]) -> bool:
     created = {a.parameters.get("bucket_name") for a in actions
                if a.action_name == "create_storage_bucket"}
+    # Only a *valid* encryption action counts. A malformed one (e.g.
+    # encryption_type "none") would otherwise satisfy the rule, pass policy,
+    # and let the bucket be created before the encryption fails at execution —
+    # leaving an unencrypted bucket. Requiring a valid type blocks such plans.
     encrypted = {a.parameters.get("bucket_name") for a in actions
-                 if a.action_name == "enable_bucket_encryption"}
+                 if a.action_name == "enable_bucket_encryption"
+                 and a.parameters.get("encryption_type") in VALID_ENCRYPTION_TYPES}
     return bool(created - encrypted)
 
 

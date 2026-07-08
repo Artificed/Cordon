@@ -199,3 +199,14 @@ def test_state_check_projects_plan_effects():
     configure_only = plan(act("enable_bucket_encryption", bucket_name="dev-data-bucket",
                               encryption_type="AES256"))
     assert check_state(configure_only, model).blocked
+
+
+def test_malformed_encryption_does_not_satisfy_encrypt_policy(dataset):
+    """A create paired with an invalid encryption action still violates POL-STO-002."""
+    from cordon.guardrails import check_policies
+    bad = plan(act("create_storage_bucket", bucket_name="production-data-bucket",
+                   environment="production", public_access=False),
+               act("enable_bucket_encryption", bucket_name="production-data-bucket",
+                   encryption_type="none"))
+    verdict = check_policies(bad, dataset.policies)
+    assert verdict.blocked and "POL-STO-002" in verdict.reason
