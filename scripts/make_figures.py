@@ -152,11 +152,44 @@ def fig_ladder(ladder, out: Path):
     plt.close(fig)
 
 
+def fig_ablation(analysis, out: Path):
+    """Decision accuracy per ablation config, full Cordon highlighted."""
+    labels = {
+        "cordon_full": "Full Cordon", "cordon_no_policy": "− policy",
+        "cordon_no_risk": "− risk", "cordon_no_reconcile": "− reconcile",
+        "cordon_no_adversarial": "− adversarial", "cordon_no_state": "− state",
+        "cordon_no_capability": "− capability",
+    }
+    m = _metric_map(analysis)["decision accuracy"]
+    items = [(labels.get(a, a), 100 * (m[a] or 0), a) for a in m]
+    items.sort(key=lambda t: t[1])
+    fig, ax = plt.subplots(figsize=(7.6, 4.2))
+    colors = ["#009E73" if a == "cordon_full" else "#9a9a9a" for _, _, a in items]
+    bars = ax.barh([lbl for lbl, _, _ in items], [v for _, v, _ in items],
+                   color=colors, height=0.68)
+    for rect, (_, v, _) in zip(bars, items):
+        ax.annotate(f"{v:.1f}%", (v, rect.get_y() + rect.get_height() / 2),
+                    va="center", ha="left", fontsize=9, color="#333",
+                    xytext=(3, 0), textcoords="offset points")
+    ax.set_xlim(0, 108)
+    ax.set_xticks(range(0, 101, 20))
+    ax.set_xticklabels([f"{t}%" for t in range(0, 101, 20)])
+    ax.xaxis.grid(True, color="#e6e6e6", linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.tick_params(length=0)
+    ax.set_title("Decision accuracy when one layer is removed", loc="left",
+                 weight="bold")
+    fig.savefig(out / "fig_ablation.png")
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate thesis figures")
     parser.add_argument("records", nargs="?", default=None)
     parser.add_argument("--ladder", nargs="+", default=None,
                         help="model=records.jsonl pairs, in capability order")
+    parser.add_argument("--ablation", default=None,
+                        help="ablation records.jsonl")
     parser.add_argument("--out", default="figures")
     args = parser.parse_args()
 
@@ -179,6 +212,10 @@ def main() -> None:
             ladder.append((label, analyze(load_records(Path(path)), dataset)))
         fig_ladder(ladder, out)
         print(f"wrote model-ladder figure to {out}")
+
+    if args.ablation:
+        fig_ablation(analyze(load_records(Path(args.ablation)), dataset), out)
+        print(f"wrote ablation figure to {out}")
 
 
 if __name__ == "__main__":
