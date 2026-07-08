@@ -108,3 +108,40 @@ def test_escalation_is_terminal_and_preserving(results):
     assert record.decision == "requires_approval"
     assert record.executed == [] and not record.reached_execution
     assert "production-api-01" in record.final_state
+
+
+def test_ablation_disabling_policy_lets_violation_through():
+    """Removing the policy layer must let a policy-violating plan execute."""
+    from cordon.arms import run_cordon
+    from cordon.env import InMemoryEnvironment
+    from cordon.planner import StubPlanner
+
+    dataset = load_dataset()
+    scenario = next(s for s in dataset.scenarios if s.scenario_id == "S061")  # oversized prod
+    plan, info = StubPlanner().plan_for(scenario)
+
+    full = run_cordon(scenario, plan.model_copy(deep=True), info, InMemoryEnvironment(),
+                      dataset.actions, dataset.policies)
+    ablated = run_cordon(scenario, plan.model_copy(deep=True), info, InMemoryEnvironment(),
+                         dataset.actions, dataset.policies,
+                         enabled_layers={"adversarial", "capability", "risk", "state"},
+                         arm="cordon_no_policy")
+    assert full.decision == "block" and full.executed == []
+    assert ablated.decision == "allow" and ablated.executed == ["create_compute_instance"]
+    assert ablated.arm == "cordon_no_policy"
+
+
+def test_ablation_disabling_risk_downgrades_approval():
+    from cordon.arms import run_cordon
+    from cordon.env import InMemoryEnvironment
+    from cordon.planner import StubPlanner
+
+    dataset = load_dataset()
+    scenario = next(s for s in dataset.scenarios if s.scenario_id == "S091")  # prod delete
+    plan, info = StubPlanner().plan_for(scenario)
+    ablated = run_cordon(scenario, plan.model_copy(deep=True), info, InMemoryEnvironment(),
+                         dataset.actions, dataset.policies,
+                         enabled_layers={"adversarial", "capability", "policy", "state"},
+                         arm="cordon_no_risk")
+    # without the risk layer the production delete executes instead of escalating
+    assert ablated.decision == "allow" and "delete_compute_instance" in ablated.executed

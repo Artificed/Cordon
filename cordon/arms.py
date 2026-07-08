@@ -89,13 +89,17 @@ def run_baseline(
             reached = True
             decision = Decision.FAIL_SAFE if error else Decision.ALLOW
 
+    arm_label = getattr(arm, "value", arm)
     return _finish(dict(
-        run_id=run_id or f"{scenario.scenario_id}-{arm.value}-r{rep}",
-        scenario_id=scenario.scenario_id, arm=arm, rep=rep,
+        run_id=run_id or f"{scenario.scenario_id}-{arm_label}-r{rep}",
+        scenario_id=scenario.scenario_id, arm=arm_label, rep=rep,
         dataset_hash=dataset_hash, prompt_hash=prompt_hash,
         planner=planner_info, plan=plan, layers=layers, decision=decision,
         executed=executed, error=error, reached_execution=reached,
     ), env, timing)
+
+
+ALL_LAYERS = ("adversarial", "capability", "policy", "risk", "state")
 
 
 def run_cordon(
@@ -110,12 +114,16 @@ def run_cordon(
     run_id: str | None = None,
     dataset_hash: str = "",
     prompt_hash: str = "",
+    enabled_layers: set[str] | None = None,
+    reconcile_enabled: bool = True,
+    arm: Arm = Arm.CORDON,
 ) -> ExecutionRecord:
+    # enabled_layers is for ablation studies; None means the full control plane.
+    active = set(ALL_LAYERS) if enabled_layers is None else set(enabled_layers)
     catalog = {a.action_name: a for a in actions}
     interface = ExecutionInterface(actions, env)
     timing: dict[str, float] = {"plan": round(planner_info.latency_ms, 3)}
-    layers: dict[str, str] = {key: NOT_EVALUATED for key in
-                              ("adversarial", "capability", "policy", "risk", "state")}
+    layers: dict[str, str] = {key: NOT_EVALUATED for key in ALL_LAYERS}
 
     _setup_environment(scenario, env)
     model = StateModel.from_initial_state(scenario.initial_state.resources)
@@ -137,7 +145,7 @@ def run_cordon(
         decision = Decision.BLOCK
         layers["blocked_by"] = "planner_refusal"
     else:
-        gates = [
+        candidate_gates = [
             ("adversarial", lambda: check_adversarial(
                 scenario.natural_language_intent, scenario.initial_state.resources),
              Decision.BLOCK),
@@ -146,6 +154,7 @@ def run_cordon(
             ("risk", lambda: check_risk(plan, policies), Decision.REQUIRES_APPROVAL),
             ("state", lambda: check_state(plan, model), Decision.BLOCK),
         ]
+        gates = [g for g in candidate_gates if g[0] in active]
         for layer_name, gate, failing_decision in gates:
             verdict = _timed(timing, layer_name, gate)
             layers[layer_name] = verdict.reason or "pass"
@@ -159,8 +168,9 @@ def run_cordon(
             reached = True
             for action in plan.actions[:len(executed)]:
                 model.apply_action(action)
-            reconcile_info = _timed(timing, "reconcile", reconcile,
-                                    model, env, interface, correction_guard)
+            if reconcile_enabled:
+                reconcile_info = _timed(timing, "reconcile", reconcile,
+                                        model, env, interface, correction_guard)
             if error:
                 decision = Decision.FAIL_SAFE
             elif reconcile_info.drift_detected:
@@ -169,9 +179,10 @@ def run_cordon(
             else:
                 decision = Decision.ALLOW
 
+    arm_label = getattr(arm, "value", arm)
     return _finish(dict(
-        run_id=run_id or f"{scenario.scenario_id}-cordon-r{rep}",
-        scenario_id=scenario.scenario_id, arm=Arm.CORDON, rep=rep,
+        run_id=run_id or f"{scenario.scenario_id}-{arm_label}-r{rep}",
+        scenario_id=scenario.scenario_id, arm=arm_label, rep=rep,
         dataset_hash=dataset_hash, prompt_hash=prompt_hash,
         planner=planner_info, plan=plan, layers=layers, decision=decision,
         executed=executed, error=error, reached_execution=reached,

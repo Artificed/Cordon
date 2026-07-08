@@ -185,7 +185,8 @@ class ExecutionRecord(BaseModel):
 
     run_id: str
     scenario_id: str
-    arm: Arm
+    # Arm value ("baseline"/"cordon"/...) or an ablation label ("cordon_no_policy").
+    arm: str
     rep: int
     dataset_hash: str = ""
     prompt_hash: str = ""
