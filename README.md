@@ -42,6 +42,22 @@ python dataset/generate_dataset.py   # regenerate from templates x parameter gri
 python dataset/validate_dataset.py   # independent integrity checks (must pass)
 ```
 
+## Running the experiment
+
+```bash
+docker compose up -d                        # LocalStack (pinned community 4.5)
+python scripts/dryrun_dataset.py            # 240/240 executability report
+
+# offline (no API key): stub planner, both paired arms
+python -m cordon.runner --planner stub --env localstack --arms baseline cordon --reps 1
+
+# live pilot (needs OPENAI_API_KEY in .env): cheap model, scenario subset
+python -m cordon.runner --planner openai --tier pilot --reps 1 --out experiments/pilot
+
+# metrics
+python -m cordon.analysis experiments/<run>/records.jsonl
+```
+
 ## Layout
 
 ```
@@ -49,18 +65,27 @@ dataset/            evaluation dataset: generator, validator, artifacts
 cordon/
   schema.py         domain models: scenarios, plans, execution records
   dataset.py        typed loader + artifact fingerprint
-  planner_stub.py   deterministic offline planner (LLM planner replaces it)
+  config.py         config.yaml + .env loading
+  planner.py        OpenAI planner (strict structured output) + stub planner
+  prompts/          versioned planner prompts (core / prompt-guardrails)
   execution.py      execution interface: validation + existence checks + dispatch
-  env/              environment backends (in-memory now; LocalStack next)
+  env/              environment backends: in-memory and LocalStack
+  state_model.py    believed + desired resource state (preconditions, drift diff)
+  guardrails/       adversarial / capability / policy / risk / state layers
+  reconcile.py      drift detection + guardrailed correction (one cycle)
+  arms.py           the three pipelines wired from shared components
+  runner.py         scenarios x arms x reps -> resume-safe records.jsonl + manifest
   scoring.py        offline judge: record + oracle -> per-run facts
-tests/              unit tests; the dataset doubles as the fixture
+  analysis.py       metrics with Wilson CIs, per-category tables, McNemar
+tests/              unit + integration tests; the dataset doubles as the fixture
 ```
 
 ## Status
 
-- [x] Dataset v2: generated, validated, 10-action catalog
-- [x] Domain models, execution interface, in-memory environment, scoring, stub planner
-- [ ] LLM planner (structured output) + prompt variants
-- [ ] LocalStack environment backend
-- [ ] Guardrail layers, state model, reconciliation
-- [ ] Experiment runner + metrics analysis
+- [x] Dataset v2: generated, validated, 10-action catalog; 240/240 dry-run on LocalStack
+- [x] Domain models, execution interface, environments (memory + LocalStack), scoring
+- [x] LLM planner (strict structured output) + prompt variants; stub planner for offline work
+- [x] Guardrail layers, state model, reconciliation; offline e2e green (240 scenarios)
+- [x] Experiment runner + metrics analysis (CIs, McNemar, flip-rate)
+- [ ] Live pilot on the cheap model (needs `OPENAI_API_KEY` in `.env`), prompt freeze
+- [ ] Full run: 240 x 3 arms x 3 reps on the pinned model
