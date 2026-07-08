@@ -11,6 +11,7 @@ provides one, an explicit desired configuration. The model backs two layers:
   reality to detect configuration drift.
 """
 
+from copy import deepcopy
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -49,7 +50,10 @@ class StateModel:
     def from_initial_state(cls, resources: list[Resource]) -> "StateModel":
         model = cls()
         for r in resources:
-            attributes = dict(r.attributes)
+            # Deep copy: attributes hold nested mutables (ingress_rules) that
+            # apply_action mutates. A shallow copy would share those lists with
+            # the dataset object and corrupt it across repetitions.
+            attributes = deepcopy(dict(r.attributes))
             desired = attributes.pop("desired_state", None)
             model._records[r.resource_id] = ResourceRecord(
                 resource_id=r.resource_id,

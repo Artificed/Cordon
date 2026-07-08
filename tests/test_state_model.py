@@ -84,3 +84,16 @@ def test_refresh_overwrites_beliefs_keeps_desired(model):
     record = model.get("staging-assets-bucket")
     assert record.attributes["encryption"] == "disabled"
     assert record.desired_state == {"encryption": "enabled"}
+
+
+def test_from_initial_state_does_not_mutate_source():
+    """Regression: apply_action must not pollute the scenario's attributes
+    across repetitions (nested ingress_rules list was shared via shallow copy)."""
+    sg = Resource(resource_type="security_group", resource_id="staging-api-sg",
+                  environment="staging", attributes={"ingress_rules": []})
+    for _ in range(3):
+        model = StateModel.from_initial_state([sg])
+        model.apply_action(act("update_firewall_rule",
+                               security_group_id="staging-api-sg", port=443,
+                               protocol="tcp", cidr="10.0.0.0/8"))
+    assert sg.attributes["ingress_rules"] == []  # source untouched after 3 rounds

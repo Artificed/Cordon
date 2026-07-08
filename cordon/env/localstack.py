@@ -16,6 +16,7 @@ The backend assumes it owns the LocalStack instance: cleanup() removes every
 bucket, tagged instance, and non-default security group.
 """
 
+import time
 from typing import Any
 
 import boto3
@@ -95,9 +96,25 @@ class LocalStackEnvironment(EnvironmentBackend):
         instance_ids = [i["InstanceId"] for i in self._live_instances()]
         if instance_ids:
             self.ec2.terminate_instances(InstanceIds=instance_ids)
+        deleted = False
         for sg in self.ec2.describe_security_groups()["SecurityGroups"]:
             if sg["GroupName"] != "default":
                 self.ec2.delete_security_group(GroupId=sg["GroupId"])
+                deleted = True
+        # EC2 deletes are asynchronous in LocalStack: a just-deleted security
+        # group lingers briefly, so a name lookup can return the stale group
+        # (with its old rules) alongside a freshly recreated one. Wait until
+        # only the default group remains so each run starts from clean state.
+        if deleted:
+            self._wait_for_sg_cleanup()
+
+    def _wait_for_sg_cleanup(self, attempts: int = 50, delay: float = 0.05) -> None:
+        for _ in range(attempts):
+            names = [g["GroupName"]
+                     for g in self.ec2.describe_security_groups()["SecurityGroups"]]
+            if all(name == "default" for name in names):
+                return
+            time.sleep(delay)
 
     # ------------------------------------------------------------------
     # Reads
@@ -209,6 +226,10 @@ class LocalStackEnvironment(EnvironmentBackend):
             return "invalid_resource_name"
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "ClientError")
+            if code == "InvalidPermission.Duplicate":
+                # The requested ingress rule already exists — the desired end
+                # state holds, so treat it as an idempotent success.
+                return None
             if code in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
                 return "name_conflict"
             if code in ("NoSuchBucket", "InvalidGroup.NotFound",
