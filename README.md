@@ -48,15 +48,25 @@ python dataset/validate_dataset.py   # independent integrity checks (must pass)
 docker compose up -d                        # LocalStack (pinned community 4.5)
 python scripts/dryrun_dataset.py            # 240/240 executability report
 
-# offline (no API key): stub planner, both paired arms
-python -m cordon.runner --planner stub --env localstack --arms baseline cordon --reps 1
+# 1. pre-generate + cache LLM plans concurrently (needs OPENAI_API_KEY in .env)
+python scripts/pregenerate_plans.py --model gpt-5-mini --variants core promptguard --reps 3 --out experiments/full
 
-# live pilot (needs OPENAI_API_KEY in .env): cheap model, scenario subset
-python -m cordon.runner --planner openai --tier pilot --reps 1 --out experiments/pilot
+# 2. replay cached plans through all three arms on LocalStack (no API calls)
+python -m cordon.runner --planner cached --model gpt-5-mini --plans experiments/full \
+    --arms baseline prompt_guardrails cordon --reps 3 --env localstack --out experiments/full
 
-# metrics
-python -m cordon.analysis experiments/<run>/records.jsonl
+# 3. metrics (Wilson CIs, per-category, McNemar, flip-rate)
+python -m cordon.analysis experiments/full/records.jsonl
+
+# ancillary studies (all replay cached plans — free)
+python scripts/run_ablations.py --model gpt-5-mini --plans experiments/full --reps 3 --out experiments/full-ablations
+python scripts/compare_runs.py nano=.../records.jsonl mini=.../records.jsonl   # model ladder
+python scripts/make_figures.py experiments/full/records.jsonl --out figures    # thesis figures
+python scripts/cost_report.py experiments                                      # spend so far
 ```
+
+Offline development without an API key uses the deterministic stub planner:
+`python -m cordon.runner --planner stub --env memory --arms baseline cordon --reps 1`.
 
 ## Layout
 
@@ -84,8 +94,12 @@ tests/              unit + integration tests; the dataset doubles as the fixture
 
 - [x] Dataset v2: generated, validated, 10-action catalog; 240/240 dry-run on LocalStack
 - [x] Domain models, execution interface, environments (memory + LocalStack), scoring
-- [x] LLM planner (strict structured output) + prompt variants; stub planner for offline work
+- [x] LLM planner (strict structured output) + prompt variants; plan cache; stub planner
 - [x] Guardrail layers, state model, reconciliation; offline e2e green (240 scenarios)
-- [x] Experiment runner + metrics analysis (CIs, McNemar, flip-rate)
-- [ ] Live pilot on the cheap model (needs `OPENAI_API_KEY` in `.env`), prompt freeze
-- [ ] Full run: 240 x 3 arms x 3 reps on the pinned model
+- [x] Experiment runner + metrics analysis (CIs, McNemar, flip-rate) + figures
+- [x] Pilot (gpt-5-mini) → prompt frozen to v2
+- [x] Full run: 240 × 3 arms × 3 reps (gpt-5-mini); guardrail ablation study
+- [~] Planner-model ladder (gpt-5-nano, gpt-5-mini, gpt-5.5)
+
+Headline (gpt-5-mini): decision accuracy 41.7% (baseline) → 75.1% (prompt-guardrails)
+→ 98.6% (Cordon); harmful-action execution 94.4% → 0%; guardrail overhead 9 ms.
