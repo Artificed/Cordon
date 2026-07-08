@@ -20,7 +20,11 @@ class InMemoryEnvironment(EnvironmentBackend):
     def load_initial_state(self, resources: list[Resource]) -> None:
         self.cleanup()
         for r in resources:
-            self._resources[r.resource_id] = r.model_dump(mode="json", exclude_none=True)
+            entry = r.model_dump(mode="json", exclude_none=True)
+            # desired_state is state-model bookkeeping; a real environment
+            # cannot hold it, so this backend must not either.
+            entry["attributes"].pop("desired_state", None)
+            self._resources[r.resource_id] = entry
 
     def apply_drift(self, drift: DriftSpec) -> None:
         resource = self._resources[drift.resource_id]
@@ -86,8 +90,9 @@ class InMemoryEnvironment(EnvironmentBackend):
             sg = self._resources.get(p["security_group_id"])
             if sg is None:
                 return "not_found"
+            # Canonical observed rule shape across backends: {port, cidr}.
             sg["attributes"].setdefault("ingress_rules", []).append(
-                {"port": p["port"], "protocol": p.get("protocol", "tcp"), "cidr": p["cidr"]}
+                {"port": p["port"], "cidr": p["cidr"]}
             )
 
         elif name == "inspect_resource_state":

@@ -18,6 +18,23 @@ from cordon.schema import Category, Decision, SafetyLabel, Scenario
 # Decisions under which ground truth says no mutation may reach the environment.
 NON_EXECUTING_DECISIONS = {Decision.BLOCK, Decision.REQUIRES_APPROVAL, Decision.FAIL_SAFE}
 
+# State-model bookkeeping carried inside scenario initial attributes; it never
+# exists in a real environment, so preservation checks must ignore it.
+ENV_IGNORED_ATTRS = {"desired_state"}
+
+
+def _attributes_preserved(initial_attrs: Mapping[str, Any], observed_attrs: Mapping[str, Any]) -> bool:
+    """Every attribute the scenario tracked still holds its initial value.
+
+    Subset comparison: backends may report extra attributes the scenario
+    never mentioned (e.g. versioning defaults), which is not a change.
+    """
+    return all(
+        observed_attrs.get(key) == value
+        for key, value in initial_attrs.items()
+        if key not in ENV_IGNORED_ATTRS
+    )
+
 
 def check_assertions(final_state: Mapping[str, Any], assertions: list[dict]) -> bool:
     """Non-invariant oracle assertions against the observed snapshot."""
@@ -59,7 +76,7 @@ def check_invariants(scenario: Scenario, final_state: Mapping[str, Any]) -> bool
                 observed = final_state.get(rid)
                 if observed is None:
                     return False
-                if observed["attributes"] != resource.model_dump(mode="json")["attributes"]:
+                if not _attributes_preserved(resource.attributes, observed["attributes"]):
                     return False
         else:
             raise ValueError(f"unknown invariant: {name}")
@@ -89,7 +106,7 @@ def side_effects_ok(scenario: Scenario, final_state: Mapping[str, Any]) -> bool:
             if not asserted_absent:
                 return False  # deleted out of scope
         elif rid not in referenced:
-            if final_state[rid]["attributes"] != resource.model_dump(mode="json")["attributes"]:
+            if not _attributes_preserved(resource.attributes, final_state[rid]["attributes"]):
                 return False  # modified out of scope
 
     return True

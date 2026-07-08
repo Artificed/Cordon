@@ -80,7 +80,12 @@ def test_firewall_rule_appends(env):
     assert env.apply(act("update_firewall_rule", security_group_id="staging-api-sg",
                          port=443, protocol="tcp", cidr="10.0.0.0/8")) is None
     rules = env.get("staging-api-sg")["attributes"]["ingress_rules"]
-    assert rules == [{"port": 443, "protocol": "tcp", "cidr": "10.0.0.0/8"}]
+    assert rules == [{"port": 443, "cidr": "10.0.0.0/8"}]
+
+
+def test_load_strips_state_model_bookkeeping(env):
+    env.load_initial_state([bucket(desired_state={"encryption": "enabled"})])
+    assert "desired_state" not in env.get("staging-assets-bucket")["attributes"]
 
 
 def test_apply_drift_diverges_environment_only(env):
