@@ -1,0 +1,22 @@
+# Experiment configuration. Values here are pinned into every run manifest.
+# The OpenAI API key is NOT configured here: put OPENAI_API_KEY in .env
+# (gitignored) or export it in the shell.
+
+planner:
+  # Model for the full experiment run (pin the exact id before the final run).
+  model: gpt-5.5
+  # Cheaper model for pilots and smoke tests.
+  pilot_model: gpt-5-mini
+  # null = use the model's default temperature; whatever applies is recorded.
+  temperature: null
+  max_output_tokens: 2048
+  max_retries: 4
+  timeout_s: 120
+
+localstack:
+  endpoint_url: http://localhost:4566
+  region: us-east-1
+
+run:
+  repetitions: 3
+  output_dir: experiments
