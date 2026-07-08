@@ -1,0 +1,218 @@
+"""Experiment runner: scenarios x arms x repetitions -> records.jsonl.
+
+Design points:
+
+- Arms ``baseline`` and ``cordon`` share the same sampled plan per
+  (scenario, repetition) — a paired design that isolates the control-plane
+  effect and halves planner calls. ``prompt_guardrails`` uses its own
+  planner variant, so it plans separately.
+- Records append to JSONL as they finish; rerunning with the same output
+  directory resumes, skipping run_ids already present.
+- ``manifest.json`` pins everything needed to reproduce or audit the run:
+  dataset hash, prompt hashes, model, config snapshot.
+
+Usage:
+  python -m cordon.runner --planner stub --env localstack --reps 1
+  python -m cordon.runner --planner openai --tier pilot --reps 1 \
+      --scenarios S001,S061,S091 --out experiments/pilot
+"""
+
+import argparse
+import datetime as _dt
+import json
+from pathlib import Path
+
+import cordon
+from cordon.arms import run_baseline, run_cordon
+from cordon.config import DEFAULT_CONFIG_PATH, load_config
+from cordon.dataset import DEFAULT_DATASET_PATH, dataset_hash, load_dataset
+from cordon.env import InMemoryEnvironment
+from cordon.env.localstack import LocalStackEnvironment
+from cordon.planner import OpenAIPlanner, PlannerError, StubPlanner
+from cordon.schema import Arm, Decision, ExecutionRecord, Plan, PlannerInfo
+
+ALL_ARMS = (Arm.BASELINE, Arm.PROMPT_GUARDRAILS, Arm.CORDON)
+CORE_PLAN_ARMS = {Arm.BASELINE, Arm.CORDON}
+
+
+def make_environment(kind: str, config):
+    if kind == "memory":
+        return InMemoryEnvironment()
+    if kind == "localstack":
+        return LocalStackEnvironment(endpoint_url=config.localstack.endpoint_url,
+                                     region=config.localstack.region)
+    raise ValueError(f"unknown environment kind: {kind}")
+
+
+def make_planners(kind: str, dataset, config, model: str, arms) -> dict[str, object]:
+    """One planner per prompt variant actually needed."""
+    planners: dict[str, object] = {}
+    variants = set()
+    if CORE_PLAN_ARMS & set(arms):
+        variants.add("core")
+    if Arm.PROMPT_GUARDRAILS in arms:
+        variants.add("promptguard")
+    for variant in variants:
+        if kind == "stub":
+            planners[variant] = StubPlanner()
+        elif kind == "openai":
+            planners[variant] = OpenAIPlanner(
+                dataset.actions, dataset.policies, model=model, variant=variant,
+                temperature=config.planner.temperature,
+                max_output_tokens=config.planner.max_output_tokens,
+                timeout_s=config.planner.timeout_s,
+                max_retries=config.planner.max_retries,
+            )
+        else:
+            raise ValueError(f"unknown planner kind: {kind}")
+    return planners
+
+
+def _planner_error_record(scenario, arm: Arm, rep: int, error: Exception,
+                          dataset_sha: str) -> ExecutionRecord:
+    return ExecutionRecord(
+        run_id=f"{scenario.scenario_id}-{arm.value}-r{rep}",
+        scenario_id=scenario.scenario_id, arm=arm, rep=rep,
+        dataset_hash=dataset_sha,
+        plan=Plan(), planner=PlannerInfo(model="error"),
+        layers={"blocked_by": "planner_error"},
+        decision=Decision.FAIL_SAFE, error=f"planner_error:{error}",
+    )
+
+
+def run_experiment(
+    *,
+    arms=ALL_ARMS,
+    planner_kind: str = "stub",
+    env_kind: str = "localstack",
+    reps: int | None = None,
+    out_dir: str | Path,
+    model: str | None = None,
+    scenario_ids: set[str] | None = None,
+    dataset_path=DEFAULT_DATASET_PATH,
+    config_path=DEFAULT_CONFIG_PATH,
+) -> Path:
+    config = load_config(config_path)
+    reps = reps if reps is not None else config.run.repetitions
+    dataset = load_dataset(dataset_path)
+    dataset_sha = dataset_hash(dataset_path)
+    scenarios = [s for s in dataset.scenarios
+                 if scenario_ids is None or s.scenario_id in scenario_ids]
+    arms = [Arm(a) for a in arms]
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    records_path = out / "records.jsonl"
+    done: set[str] = set()
+    if records_path.exists():
+        with records_path.open() as f:
+            done = {json.loads(line)["run_id"] for line in f if line.strip()}
+
+    planners = make_planners(planner_kind, dataset, config,
+                             model or config.planner.model, arms)
+    env = make_environment(env_kind, config)
+
+    manifest = {
+        "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "package_version": cordon.__version__,
+        "planner_kind": planner_kind,
+        "model": (model or config.planner.model) if planner_kind == "openai" else "stub",
+        "env_kind": env_kind,
+        "arms": [a.value for a in arms],
+        "reps": reps,
+        "scenarios": len(scenarios),
+        "dataset_hash": dataset_sha,
+        "prompt_hashes": {v: getattr(p, "prompt_sha", "") for v, p in planners.items()},
+        "config": config.model_dump(),
+        "resumed_from": len(done),
+    }
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
+
+    total = len(scenarios) * reps * len(arms)
+    finished = len(done)
+    with records_path.open("a") as sink:
+        for scenario in scenarios:
+            for rep in range(reps):
+                pending = [a for a in arms
+                           if f"{scenario.scenario_id}-{a.value}-r{rep}" not in done]
+                if not pending:
+                    continue
+
+                plans: dict[Arm, tuple] = {}
+                try:
+                    if CORE_PLAN_ARMS & set(pending):
+                        core = planners["core"].plan_for(scenario)
+                        core[1].shared_with_baseline = (
+                            Arm.BASELINE in pending and Arm.CORDON in pending)
+                        for arm in CORE_PLAN_ARMS:
+                            plans[arm] = core
+                    if Arm.PROMPT_GUARDRAILS in pending:
+                        plans[Arm.PROMPT_GUARDRAILS] = (
+                            planners["promptguard"].plan_for(scenario))
+                except PlannerError as e:
+                    for arm in pending:
+                        record = _planner_error_record(scenario, arm, rep, e, dataset_sha)
+                        sink.write(record.model_dump_json() + "\n")
+                        sink.flush()
+                        finished += 1
+                    continue
+
+                for arm in pending:
+                    plan, info = plans[arm]
+                    prompt_sha = getattr(
+                        planners["promptguard" if arm is Arm.PROMPT_GUARDRAILS
+                                 else "core"], "prompt_sha", "")
+                    common = dict(rep=rep, dataset_hash=dataset_sha,
+                                  prompt_hash=prompt_sha)
+                    if arm is Arm.CORDON:
+                        record = run_cordon(
+                            scenario, plan.model_copy(deep=True),
+                            info.model_copy(), env, dataset.actions,
+                            dataset.policies, **common)
+                    else:
+                        record = run_baseline(
+                            scenario, plan.model_copy(deep=True),
+                            info.model_copy(), env, dataset.actions,
+                            arm=arm, **common)
+                    sink.write(record.model_dump_json() + "\n")
+                    sink.flush()
+                    finished += 1
+                    if finished % 60 == 0:
+                        print(f"  ... {finished}/{total} runs", flush=True)
+
+    env.cleanup()
+    print(f"done: {finished}/{total} records in {records_path}")
+    return records_path
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the Cordon experiment")
+    parser.add_argument("--arms", nargs="+",
+                        default=[a.value for a in ALL_ARMS],
+                        choices=[a.value for a in ALL_ARMS])
+    parser.add_argument("--planner", default="stub", choices=("stub", "openai"))
+    parser.add_argument("--env", default="localstack", choices=("memory", "localstack"))
+    parser.add_argument("--reps", type=int, default=None)
+    parser.add_argument("--tier", default="full", choices=("full", "pilot"),
+                        help="which configured model to use for --planner openai")
+    parser.add_argument("--model", default=None,
+                        help="explicit model id (overrides --tier)")
+    parser.add_argument("--scenarios", default=None,
+                        help="comma-separated scenario ids (subset run)")
+    parser.add_argument("--out", default=None)
+    args = parser.parse_args()
+
+    config = load_config()
+    model = args.model or (config.planner.pilot_model if args.tier == "pilot"
+                           else config.planner.model)
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = args.out or f"experiments/{stamp}-{args.planner}-{args.env}"
+    scenario_ids = (set(args.scenarios.split(",")) if args.scenarios else None)
+
+    run_experiment(arms=args.arms, planner_kind=args.planner, env_kind=args.env,
+                   reps=args.reps, out_dir=out, model=model,
+                   scenario_ids=scenario_ids)
+
+
+if __name__ == "__main__":
+    main()

@@ -10,8 +10,8 @@ __pycache__/
 build/
 dist/
 
-# experiment outputs (raw run records are large; summaries are committed explicitly)
-experiments/records/
+# experiment outputs (promote final summaries into docs/ deliberately)
+experiments/
 dataset/execution_records.json
 
 # os / editor
