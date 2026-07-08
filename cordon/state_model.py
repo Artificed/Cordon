@@ -66,6 +66,12 @@ class StateModel:
     def get(self, resource_id: str) -> ResourceRecord | None:
         return self._records.get(resource_id)
 
+    def clone(self) -> "StateModel":
+        copy = StateModel()
+        copy._records = {rid: record.model_copy(deep=True)
+                         for rid, record in self._records.items()}
+        return copy
+
     # ------------------------------------------------------------------
     # The state check (per-verb preconditions)
     # ------------------------------------------------------------------

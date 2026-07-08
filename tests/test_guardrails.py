@@ -183,3 +183,19 @@ def test_state_check_blocks_conflicts_and_ghosts():
     assert conflict.blocked and "already_exists" in conflict.reason
     assert ghost.blocked and "unknown_resource" in ghost.reason
     assert ok.passed
+
+
+def test_state_check_projects_plan_effects():
+    """A plan may configure the resource it creates earlier in the same plan."""
+    model = StateModel.from_initial_state([])
+    create_then_configure = plan(
+        act("create_storage_bucket", bucket_name="dev-data-bucket", environment="dev"),
+        act("enable_bucket_encryption", bucket_name="dev-data-bucket",
+            encryption_type="AES256"),
+    )
+    assert check_state(create_then_configure, model).passed
+    assert not model.exists("dev-data-bucket")  # projection never mutates beliefs
+
+    configure_only = plan(act("enable_bucket_encryption", bucket_name="dev-data-bucket",
+                              encryption_type="AES256"))
+    assert check_state(configure_only, model).blocked
