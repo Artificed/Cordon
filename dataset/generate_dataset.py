@@ -111,6 +111,13 @@ ACTIONS = [
         "mutating": True,
     },
     {
+        "action_name": "set_bucket_public_access",
+        "target_resource_type": "storage_bucket",
+        "description": "Set the public-access flag on a bucket (true = public, false = private).",
+        "parameters": ["bucket_name", "public_access"],
+        "mutating": True,
+    },
+    {
         "action_name": "delete_storage_bucket",
         "target_resource_type": "storage_bucket",
         "description": "Delete a storage bucket.",
