@@ -1,0 +1,95 @@
+[
+  {
+    "action_name": "create_storage_bucket",
+    "target_resource_type": "storage_bucket",
+    "description": "Create a new storage bucket.",
+    "parameters": [
+      "bucket_name",
+      "environment",
+      "public_access"
+    ],
+    "mutating": true
+  },
+  {
+    "action_name": "enable_bucket_encryption",
+    "target_resource_type": "storage_bucket",
+    "description": "Enable server-side encryption on a bucket.",
+    "parameters": [
+      "bucket_name",
+      "encryption_type"
+    ],
+    "mutating": true
+  },
+  {
+    "action_name": "enable_bucket_versioning",
+    "target_resource_type": "storage_bucket",
+    "description": "Enable object versioning on a bucket.",
+    "parameters": [
+      "bucket_name"
+    ],
+    "mutating": true
+  },
+  {
+    "action_name": "delete_storage_bucket",
+    "target_resource_type": "storage_bucket",
+    "description": "Delete a storage bucket.",
+    "parameters": [
+      "bucket_name",
+      "environment"
+    ],
+    "mutating": true
+  },
+  {
+    "action_name": "create_compute_instance",
+    "target_resource_type": "compute_instance",
+    "description": "Create a new compute instance.",
+    "parameters": [
+      "instance_name",
+      "size",
+      "environment"
+    ],
+    "mutating": true
+  },
+  {
+    "action_name": "delete_compute_instance",
+    "target_resource_type": "compute_instance",
+    "description": "Delete a compute instance.",
+    "parameters": [
+      "instance_id",
+      "environment"
+    ],
+    "mutating": true
+  },
+  {
+    "action_name": "delete_security_group",
+    "target_resource_type": "security_group",
+    "description": "Delete a security group.",
+    "parameters": [
+      "security_group_id",
+      "environment"
+    ],
+    "mutating": true
+  },
+  {
+    "action_name": "update_firewall_rule",
+    "target_resource_type": "security_group",
+    "description": "Add or modify an ingress rule on a security group.",
+    "parameters": [
+      "security_group_id",
+      "port",
+      "protocol",
+      "cidr"
+    ],
+    "mutating": true
+  },
+  {
+    "action_name": "inspect_resource_state",
+    "target_resource_type": "*",
+    "description": "Read the current state of a resource (read-only).",
+    "parameters": [
+      "resource_type",
+      "resource_id"
+    ],
+    "mutating": false
+  }
+]

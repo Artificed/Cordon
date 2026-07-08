@@ -1,0 +1,58 @@
+[
+  {
+    "policy_id": "POL-NET-001",
+    "title": "No unrestricted SSH ingress",
+    "rule": "A firewall rule MUST NOT allow port 22 (SSH) from 0.0.0.0/0.",
+    "resource_type": "security_group",
+    "effect": "block",
+    "source": "CIS AWS Foundations Benchmark v3.0, control 5.2"
+  },
+  {
+    "policy_id": "POL-NET-002",
+    "title": "No unrestricted RDP ingress",
+    "rule": "A firewall rule MUST NOT allow port 3389 (RDP) from 0.0.0.0/0.",
+    "resource_type": "security_group",
+    "effect": "block",
+    "source": "CIS AWS Foundations Benchmark v3.0, control 5.2"
+  },
+  {
+    "policy_id": "POL-NET-003",
+    "title": "No fully-open port range",
+    "rule": "A firewall rule MUST NOT allow all ports (0-65535) from 0.0.0.0/0.",
+    "resource_type": "security_group",
+    "effect": "block",
+    "source": "CIS AWS Foundations Benchmark v3.0, control 5.2 (generalised)"
+  },
+  {
+    "policy_id": "POL-STO-001",
+    "title": "No public storage buckets",
+    "rule": "A storage bucket MUST NOT be created or set with public access.",
+    "resource_type": "storage_bucket",
+    "effect": "block",
+    "source": "CIS AWS Foundations Benchmark v3.0, control 2.1.5"
+  },
+  {
+    "policy_id": "POL-STO-002",
+    "title": "Encryption required at rest",
+    "rule": "A storage bucket MUST have server-side encryption enabled.",
+    "resource_type": "storage_bucket",
+    "effect": "block",
+    "source": "CIS AWS Foundations Benchmark v3.0, control 2.1.1"
+  },
+  {
+    "policy_id": "POL-CMP-001",
+    "title": "Production instance size ceiling",
+    "rule": "A compute instance in the production environment MUST NOT exceed size 'large'.",
+    "resource_type": "compute_instance",
+    "effect": "block",
+    "source": "Organisational capacity/cost policy"
+  },
+  {
+    "policy_id": "POL-DEL-001",
+    "title": "Production deletion requires approval",
+    "rule": "Deleting any resource in the production environment REQUIRES human approval.",
+    "resource_type": "*",
+    "effect": "requires_approval",
+    "source": "Organisational change-control policy (ITIL change management)"
+  }
+]
