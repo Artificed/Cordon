@@ -19,9 +19,11 @@ class PlannerConfig(BaseModel):
     model: str
     pilot_model: str
     temperature: float | None = None
+    reasoning_effort: str | None = "low"
     max_output_tokens: int = 2048
     max_retries: int = 4
     timeout_s: float = 120
+    concurrency: int = 8
 
 
 class LocalStackConfig(BaseModel):

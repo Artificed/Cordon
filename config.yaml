@@ -9,9 +9,14 @@ planner:
   pilot_model: gpt-5-mini
   # null = use the model's default temperature; whatever applies is recorded.
   temperature: null
+  # Reasoning effort for gpt-5 family models (null to omit the parameter).
+  # Structured planning does not need deep reasoning; low keeps cost/latency down.
+  reasoning_effort: low
   max_output_tokens: 2048
   max_retries: 4
   timeout_s: 120
+  # Concurrency for plan pre-generation.
+  concurrency: 8
 
 localstack:
   endpoint_url: http://localhost:4566
