@@ -1,0 +1,13 @@
+# Experiment environment. Start with: docker compose up -d
+# Pinned to the last community line that runs without a license token
+# (2026 'latest' images require LocalStack auth); the pin also makes the
+# experiment environment reproducible.
+services:
+  localstack:
+    image: localstack/localstack:4.5
+    container_name: cordon-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,ec2
+      - EAGER_SERVICE_LOADING=1
