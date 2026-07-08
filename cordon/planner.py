@@ -34,7 +34,7 @@ from cordon.schema import ActionSpec, Plan, PlannedAction, PlannerInfo, Policy, 
 from cordon.planner_stub import stub_plan
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 # Union of every catalog parameter; the plan schema is flat-nullable because
 # strict structured output requires all properties to be required, so unused
