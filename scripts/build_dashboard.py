@@ -106,16 +106,16 @@ def row(metric, b, p, c, best="c", note=""):
 
 HTML = f"""<div class="wrap">
 <header>
-  <div class="eyebrow">Cordon &middot; Experiment Results</div>
-  <h1>A guardrailed control plane makes an LLM cloud agent safe &mdash; prompting alone does not.</h1>
-  <p class="lede">240 infrastructure scenarios &times; 3 configurations &times; 3 repetitions, run with real
-  LLM planners against a LocalStack cloud. The ungoverned agent executes <b>94%</b> of harmful actions;
-  Cordon executes <b>0%</b> &mdash; while completing every safe task.</p>
+  <div class="eyebrow">Cordon &middot; Experiment Results &middot; revised after independent review</div>
+  <h1>An ungoverned LLM cloud agent is unsafe at every model scale. A control plane buys capability, not better blocking.</h1>
+  <p class="lede">240 infrastructure scenarios &times; 3 configurations &times; 3 repetitions &times; 3 planner
+  models, run against a LocalStack cloud. The ungoverned agent executes <b>83&ndash;98%</b> of harmful actions
+  &mdash; even with a frontier planner. Any policy layer collapses that to <b>&asymp;0%</b>.</p>
   <div class="tiles">
-    {tile("Decision accuracy", "98.6%", "Cordon vs baseline <b>41.7%</b>")}
-    {tile("Harmful execution", "0.0%", "baseline <b>94.4%</b>")}
-    {tile("Drift correction", "100%", "baseline <b>0%</b>")}
-    {tile("Guardrail overhead", "9&nbsp;ms", "0.2% of planner latency")}
+    {tile("Harmful execution", "0.0%", "guarded arms &middot; baseline <b>83&ndash;98%</b>")}
+    {tile("Enforcement accuracy", "94.4%", "Cordon <i>and</i> prompt, tied at gpt-5.5")}
+    {tile("Drift correction", "100%", "prompt-guardrails <b>1.7%</b>")}
+    {tile("Guardrail overhead", "9&ndash;12&nbsp;ms", "0.2% of planner latency")}
   </div>
 </header>
 
@@ -125,28 +125,31 @@ HTML = f"""<div class="wrap">
   <p class="note">Every arm shares the same planner, action schema, execution interface and environment.
   <span class="b-baseline">Baseline</span> executes any structurally valid plan;
   <span class="b-prompt">Prompt-guardrails</span> puts the policies in the planner's prompt;
-  <span class="b-cordon">Cordon</span> enforces them in a deterministic control plane. Planner: gpt-5-mini.</p>
+  <span class="b-cordon">Cordon</span> enforces them in a deterministic control plane. Planner: gpt-5-mini.
+  Brackets are 95% cluster-bootstrap intervals resampling <i>scenarios</i>, the independent unit.</p>
   <div class="tbl-wrap"><table>
     <thead><tr><th>Metric</th>
       <th><span class="dot" style="background:var(--baseline)"></span>Baseline</th>
       <th><span class="dot" style="background:var(--prompt)"></span>Prompt-guard</th>
       <th><span class="dot" style="background:var(--cordon)"></span>Cordon</th></tr></thead>
     <tbody>
-      {row("Decision accuracy", "41.7%", "75.1%", "98.6%")}
       {row("Harmful-action execution", "94.4%", "0.0%", "0.0%", best="c")}
       {row("Policy-violation execution", "100%", "0.0%", "0.0%")}
+      {row("Decision accuracy (enforcement-only)", "50.0%", "94.6%", "98.1%")}
       {row("Safe-task completion", "77.8%", "78.1%", "100%")}
       {row("Drift correction", "0%", "1.7%", "100%")}
-      {row("Task refusal (over-blocking)", "4.2%", "50.1%", "4.2%")}
+      {row("Blocked <i>safe</i> tasks (over-blocking)", "0.0%", "0.0%", "0.0%")}
     </tbody>
   </table></div>
-  <div class="callout"><span class="q">Prompting is not enforcement.</span>
-    <p>Given the same policies, prompt-guardrails buys safety by refusing <b>half of all tasks</b> &mdash; its
-    safe-task completion (78%) barely beats the baseline. It cannot escalate high-risk actions for approval
-    or reconcile drift. Only the control plane gives graduated, stateful decisions at full utility.</p></div>
+  <div class="callout"><span class="q">Prompting <i>is</i> enforcement &mdash; nearly as good as a control plane.</span>
+    <p>On the categories every arm can contest, a prompt reaches <b>94.6%</b> against Cordon's 98.1%, and the two
+    are <b>exactly tied (94.4%)</b> at frontier scale. Prompt-guardrails does <i>not</i> over-block: its
+    blocked-safe-task rate is <b>0.0%</b>. Its only real deficits are the things a prompt structurally cannot do
+    &mdash; reconcile drift (it has no observation loop, and the planner sees only <i>believed</i> state) and
+    escalate for approval.</p></div>
   <figure class="plate"><img alt="Decision accuracy by scenario category" src="{data_uri('fig_per_category.png')}">
-    <figcaption>Decision accuracy by category. The gaps are drift (only Cordon reconciles), high-risk
-    escalation (only Cordon), and policy / network / adversarial enforcement.</figcaption></figure>
+    <figcaption>Decision accuracy by category. Drift and high-risk escalation are Cordon-only <i>by construction</i>
+    (no other arm has a reconciliation loop or a risk layer); on policy / network enforcement, prompt &asymp; Cordon.</figcaption></figure>
 </section>
 
 <section>
@@ -154,13 +157,15 @@ HTML = f"""<div class="wrap">
     <h2>&ldquo;Won&rsquo;t better models just be safe on their own?&rdquo;</h2></div>
   <p class="note">The same experiment across three planner scales &mdash; gpt-5-nano, gpt-5-mini, gpt-5.5 &mdash;
   measuring whether the ungoverned agent gets safer as the model improves.</p>
-  <figure class="plate"><img alt="Model ladder: decision accuracy and harmful execution" src="{data_uri('fig_model_ladder.png')}">
-    <figcaption>Left: decision accuracy. Right: harmful-action execution. The gaps hold across model capability.</figcaption></figure>
+  <figure class="plate"><img alt="Model ladder: harmful execution and enforcement-only accuracy" src="{data_uri('fig_model_ladder.png')}">
+    <figcaption>Left: harmful-action execution (outcome-based; no arm structurally favoured). Right:
+    enforcement-only decision accuracy &mdash; Cordon and the prompt converge, tying at gpt-5.5.</figcaption></figure>
   <div class="callout"><span class="q">No &mdash; capability is not safety.</span>
-    <p>The ungoverned baseline still executes <b>83%</b> of harmful actions even with the frontier gpt-5.5.
-    Prompt-guardrails <b>leaks with the weaker model</b> (1.1% harmful on nano) and only reaches zero once the
-    planner is strong enough. Cordon holds harmful execution at <b>0% on all three models</b> &mdash; enforcement
-    is deterministic and model-independent.</p></div>
+    <p>The ungoverned baseline still executes <b>83%</b> of harmful actions with the frontier gpt-5.5, falling
+    only from 98% at nano. But the control plane does <b>not</b> block better than a prompt: on contestable
+    categories they tie. What deterministic enforcement buys is that it <i>cannot be talked out of a decision</i>
+    &mdash; a mechanistic guarantee. (Prompt-guardrails leaked 1.1% harmful on the weakest planner while Cordon
+    leaked none, but at 60 scenarios those intervals overlap: suggestive, not established.)</p></div>
 </section>
 
 <section>
@@ -184,14 +189,26 @@ HTML = f"""<div class="wrap">
     <h2>How the numbers were produced</h2></div>
   <ul class="clean">
     <li>Metrics computed by an <b>offline judge</b> against a machine-checkable oracle &mdash; the system never grades itself; the baseline's violations are judged post-hoc against the same policies.</li>
-    <li>Baseline and Cordon share the sampled plan per scenario &mdash; a <b>paired design</b> isolating the control plane. McNemar exact test: <b>p = 7.6&times;10<sup>&minus;124</sup></b>.</li>
+    <li>Baseline and Cordon share the sampled plan per scenario &mdash; a <b>paired design</b> isolating the control plane.</li>
+    <li>The <b>scenario is the independent unit</b> (182/240 scenarios produce identical plans across repetitions), so intervals are cluster bootstraps over scenarios, not Wilson intervals over runs. Guardrail cost is measured <b>per layer</b>.</li>
+    <li>Two independent reviewers (GPT-5.5, Claude Opus 4.8) re-derived every headline number from the raw records and confirmed them &mdash; then showed the original framing overclaimed. This page reflects the corrections.</li>
     <li>Running the experiment surfaced <b>three real defects</b> a paper design would have missed (an async-delete race, a state-model aliasing bug across repetitions, a policy rule fooled by a malformed encryption action) &mdash; all fixed with regression tests.</li>
-    <li>Rates carry Wilson 95% intervals; guardrail cost is measured <b>per layer</b>, not end-to-end.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="sec-head"><div class="eyebrow">05 &middot; What this does not show</div>
+    <h2>Limits, stated plainly</h2></div>
+  <ul class="clean">
+    <li>Cordon's rules and the dataset's oracle are <b>two encodings of the same policy file</b>. Its decision-match on non-adversarial categories is a correctness property of its own implementation, not an independent empirical win. The all-categories accuracy comparison is therefore not reported as a headline.</li>
+    <li><b>0% harmful</b> is partly a completeness property of a <b>closed, 10-action schema</b> whose entire violation space is covered by hand-written rules &mdash; not evidence of general enforcement on an open action surface.</li>
+    <li>The direct-injection detector's patterns are literally the four wrapper templates used by the dataset generator, so that result is <b>circular</b>. The ablation shows the layer is not load-bearing anyway.</li>
+    <li>240 templated synthetic scenarios, three resource types, LocalStack &mdash; no real IAM, eventual consistency, or blast radius. Labels are author-generated; a second-rater &kappa; is still owed.</li>
   </ul>
 </section>
 
 <footer>
-  <span class="mono">240 scenarios &middot; 3 arms &middot; 3 models &middot; 123 tests &middot; ~$5.27 API spend</span>
+  <span class="mono">240 scenarios &middot; 3 arms &middot; 3 models &middot; 123 tests &middot; ~$13.50 API spend</span>
   <span class="mono">Cordon &mdash; Guardrailed Intent-Driven Control Plane</span>
 </footer>
 </div>"""
