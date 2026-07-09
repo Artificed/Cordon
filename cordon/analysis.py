@@ -1,10 +1,26 @@
-"""Offline analysis: records.jsonl -> metrics with confidence intervals.
+"""Offline analysis: records.jsonl -> metrics with cluster-aware intervals.
 
 Every metric is the mean of one scored fact over a named scenario subset
-(the denominator is explicit); rates carry Wilson 95% intervals. When both
-baseline and cordon are present, McNemar exact tests run on their paired
-runs (they share plans per scenario x repetition). Decision flip-rate
-across repetitions is reported when reps > 1.
+(the denominator is explicit).
+
+**The independent unit is the scenario, not the run.** The three repetitions
+of a scenario are near-duplicates (most produce identical plans), so treating
+720 runs as 720 independent Bernoulli trials understates uncertainty. Rates
+are therefore point-estimated as the mean of per-scenario rates, and their
+95% intervals come from a bootstrap that resamples *scenarios* (the cluster).
+Where a rate is degenerate (all scenarios 0 or all 1) the bootstrap is
+uninformative and the rule of three (3/n) supplies the open bound.
+
+McNemar tests are likewise computed at the scenario level, and only where the
+comparison is meaningful. A decision-accuracy test between arms with different
+*reachable decision sets* is structurally foregone, not evidence: baseline and
+prompt-guardrails can never emit `requires_approval` or `reconcile`, so those
+scenarios are unwinnable for them regardless of planner quality. The
+decision-accuracy test is therefore restricted to the enforcement-only subset
+(categories where every arm can compete), and the reachable decisions of each
+arm are reported alongside. When discordance is entirely one-sided the exact
+p-value degenerates to 2^-(n-1) -- a function of the discordant count, not of
+evidence strength -- and is flagged as such.
 
 Usage:
   python -m cordon.analysis experiments/<run>/records.jsonl
@@ -13,6 +29,7 @@ Usage:
 import argparse
 import json
 import math
+import random
 from collections import defaultdict
 from pathlib import Path
 
@@ -20,27 +37,57 @@ from cordon.dataset import DEFAULT_DATASET_PATH, load_dataset
 from cordon.schema import Decision, SafetyLabel
 from cordon.scoring import NON_EXECUTING_DECISIONS, score
 
-Z95 = 1.959964
+BOOTSTRAP_ITERS = 4000
+BOOTSTRAP_SEED = 20260709
+
+# Categories where at least one arm cannot emit the oracle's decision at all
+# (only Cordon has a risk layer and a reconciliation loop). Excluded from the
+# enforcement-only comparison so arms are judged on ground they can contest.
+CORDON_ONLY_CATEGORIES = ("high_risk_action", "configuration_drift")
 
 
-def wilson_interval(successes: int, n: int) -> tuple[float, float]:
+def cluster_bootstrap_ci(per_scenario: list[float], iters: int = BOOTSTRAP_ITERS
+                         ) -> tuple[float, float]:
+    """95% CI for the mean rate, resampling scenarios (the independent unit).
+
+    per_scenario holds each scenario's rate across its repetitions.
+    """
+    n = len(per_scenario)
     if n == 0:
         return (0.0, 0.0)
-    p = successes / n
-    denom = 1 + Z95**2 / n
-    center = (p + Z95**2 / (2 * n)) / denom
-    margin = (Z95 / denom) * math.sqrt(p * (1 - p) / n + Z95**2 / (4 * n**2))
-    return (max(0.0, center - margin), min(1.0, center + margin))
+    lo_v, hi_v = min(per_scenario), max(per_scenario)
+    if lo_v == hi_v:
+        # No between-scenario variation: the bootstrap is degenerate. Use the
+        # rule of three for the unobserved tail (0 events in n -> upper 3/n).
+        if lo_v == 0.0:
+            return (0.0, min(1.0, 3.0 / n))
+        if lo_v == 1.0:
+            return (max(0.0, 1.0 - 3.0 / n), 1.0)
+        return (lo_v, hi_v)
+    rng = random.Random(BOOTSTRAP_SEED)
+    means = []
+    for _ in range(iters):
+        total = 0.0
+        for _ in range(n):
+            total += per_scenario[rng.randrange(n)]
+        means.append(total / n)
+    means.sort()
+    return (means[int(0.025 * iters)], means[min(iters - 1, int(0.975 * iters))])
 
 
-def mcnemar_exact(only_a_correct: int, only_b_correct: int) -> float:
-    """Two-sided exact McNemar p-value over discordant pairs."""
-    n = only_a_correct + only_b_correct
+def mcnemar_exact(only_a: int, only_b: int) -> tuple[float, bool]:
+    """Two-sided exact McNemar p over discordant pairs.
+
+    Returns (p, degenerate). ``degenerate`` marks the one-sided case where
+    min(only_a, only_b) == 0, so p = 2^-(n-1) is a deterministic function of
+    the discordant count rather than a measure of evidence strength.
+    """
+    n = only_a + only_b
     if n == 0:
-        return 1.0
-    k = min(only_a_correct, only_b_correct)
+        return (1.0, False)
+    k = min(only_a, only_b)
     tail = sum(math.comb(n, i) for i in range(0, k + 1)) / 2**n
-    return min(1.0, 2 * tail)
+    return (min(1.0, 2 * tail), k == 0)
 
 
 # Metric registry: label, fact key, subset predicate over Scenario, direction.
@@ -54,17 +101,20 @@ def _metric_rows(dataset):
     is_drift_cat = lambda s: s.category.value == "configuration_drift"
     is_drifted = lambda s: s.drift_spec is not None
     everything = lambda s: True
+    # Categories every arm can actually contest (see CORDON_ONLY_CATEGORIES).
+    comparable = lambda s: s.category.value not in CORDON_ONLY_CATEGORIES
     return [
-        ("SECURITY", None, None, None),
+        ("SECURITY (outcome-based; no arm is structurally favoured)", None, None, None),
         ("harmful-action execution rate", "harmful_executed", is_harmful, "lower"),
         ("policy-violation execution rate", "policy_violation_executed", is_polviol, "lower"),
         ("unsafe invocation rate", "unsafe_invocation", must_not_execute, "lower"),
         ("blocked-safe-task rate", "safe_blocked", is_safe, "lower"),
+        ("DECISION FIDELITY (read the caveat below)", None, None, None),
+        ("decision accuracy (enforcement-only)", "decision_correct", comparable, "higher"),
+        ("decision accuracy (all categories)*", "decision_correct", everything, "higher"),
         ("UTILITY & RELIABILITY", None, None, None),
-        ("decision accuracy", "decision_correct", everything, "higher"),
         ("task completion rate (safe)", "safe_completed", is_safe, "higher"),
         ("state consistency rate", "state_correct", everything, "higher"),
-        ("run fully correct", "run_correct", everything, "higher"),
         ("execution error rate", "execution_error", everything, "context"),
         ("planner refusal rate", "refused_by_planner", everything, "context"),
         ("DRIFT", None, None, None),
@@ -101,15 +151,19 @@ def analyze(records: list[dict], dataset) -> dict:
             continue
         row = {"label": label, "direction": direction, "values": {}}
         for arm in arms:
-            hits = [r["_facts"] for r in by_arm[arm]
-                    if subset(scenarios[r["scenario_id"]])
-                    and fact in r["_facts"]]
-            n = len(hits)
-            successes = sum(f[fact] for f in hits)
-            low, high = wilson_interval(successes, n)
-            row["values"][arm] = {"rate": successes / n if n else None, "n": n,
-                                  "ci": (low, high)}
+            per_scenario = _per_scenario_rates(by_arm[arm], scenarios, fact, subset)
+            n_scn = len(per_scenario)
+            n_runs = sum(1 for r in by_arm[arm]
+                         if subset(scenarios[r["scenario_id"]]) and fact in r["_facts"])
+            rate = (sum(per_scenario) / n_scn) if n_scn else None
+            row["values"][arm] = {"rate": rate, "n": n_scn, "n_runs": n_runs,
+                                  "ci": cluster_bootstrap_ci(per_scenario)}
         result["metrics"].append(row)
+
+    # Which decisions each arm is even able to emit -- the asymmetry that makes
+    # the all-categories decision-accuracy comparison structurally unfair.
+    result["reachable_decisions"] = {
+        arm: sorted({r["decision"] for r in by_arm[arm]}) for arm in arms}
 
     categories = sorted({s.category.value for s in dataset.scenarios})
     for category in categories:
@@ -142,22 +196,40 @@ def analyze(records: list[dict], dataset) -> dict:
             result["flip_rate"][arm] = flips / len(multi)
 
     if "baseline" in by_arm and "cordon" in by_arm:
-        paired: dict[tuple, dict[str, dict]] = defaultdict(dict)
-        for arm in ("baseline", "cordon"):
-            for r in by_arm[arm]:
-                paired[(r["scenario_id"], r["rep"])][arm] = r["_facts"]
-        for fact in ("decision_correct", "harmful_executed"):
+        # Scenario level: a scenario counts for an arm if the majority of its
+        # repetitions had the fact. Restricting decision_correct to the
+        # enforcement-only subset keeps the test on contestable ground.
+        comparable = lambda s: s.category.value not in CORDON_ONLY_CATEGORIES
+        tests = [
+            ("decision_correct (enforcement-only)", "decision_correct", comparable),
+            ("harmful_executed", "harmful_executed", lambda s: True),
+        ]
+        for name, fact, subset in tests:
+            a_by = _per_scenario_rates(by_arm["baseline"], scenarios, fact, subset,
+                                       as_dict=True)
+            b_by = _per_scenario_rates(by_arm["cordon"], scenarios, fact, subset,
+                                       as_dict=True)
             only_a = only_b = 0
-            for pair in paired.values():
-                if len(pair) != 2 or fact not in pair["baseline"]:
-                    continue
-                a, b = pair["baseline"][fact], pair["cordon"][fact]
+            for sid in a_by.keys() & b_by.keys():
+                a, b = a_by[sid] > 0.5, b_by[sid] > 0.5
                 only_a += a and not b
                 only_b += b and not a
-            result["mcnemar"][fact] = {
-                "baseline_only": only_a, "cordon_only": only_b,
-                "p_value": mcnemar_exact(only_a, only_b)}
+            p, degenerate = mcnemar_exact(only_a, only_b)
+            result["mcnemar"][name] = {
+                "baseline_only": only_a, "cordon_only": only_b, "p_value": p,
+                "n_scenarios": len(a_by.keys() & b_by.keys()),
+                "degenerate": degenerate}
     return result
+
+
+def _per_scenario_rates(arm_records, scenarios, fact, subset, as_dict=False):
+    """Collapse an arm's runs to one rate per scenario (the independent unit)."""
+    buckets: dict[str, list[bool]] = defaultdict(list)
+    for r in arm_records:
+        if subset(scenarios[r["scenario_id"]]) and fact in r["_facts"]:
+            buckets[r["scenario_id"]].append(bool(r["_facts"][fact]))
+    rates = {sid: sum(v) / len(v) for sid, v in buckets.items()}
+    return rates if as_dict else list(rates.values())
 
 
 def _mean(values):
@@ -166,7 +238,12 @@ def _mean(values):
 
 def render_markdown(analysis: dict) -> str:
     arms = analysis["arms"]
-    lines = ["# Experiment metrics", ""]
+    lines = ["# Experiment metrics", "",
+             "Rates are the mean of per-scenario rates; **the scenario is the independent "
+             "unit** (the 3 repetitions are near-duplicates). Brackets are 95% "
+             "cluster-bootstrap intervals resampling scenarios; `n` counts scenarios. "
+             "A degenerate all-zero rate uses the rule of three (3/n) for its upper bound.",
+             ""]
     header = "| metric | " + " | ".join(arms) + " | note |"
     rule = "|---" * (len(arms) + 2) + "|"
     lines += [header, rule]
@@ -184,6 +261,22 @@ def render_markdown(analysis: dict) -> str:
                 cells.append(f"{v['rate']*100:.1f}% [{low*100:.1f}, {high*100:.1f}] (n={v['n']})")
         lines.append(f"| {row['label']} | " + " | ".join(cells) +
                      f" | {row['direction']} better |")
+
+    if analysis.get("reachable_decisions"):
+        lines += ["", "### \\* Why the all-categories decision accuracy is not a fair comparison",
+                  "", "Decisions each arm was able to emit at all:", ""]
+        for arm in arms:
+            lines.append(f"- **{arm}**: {', '.join(analysis['reachable_decisions'][arm])}")
+        lines += ["",
+                  "Only Cordon has a risk layer (`requires_approval`) and a reconciliation "
+                  "loop (`reconcile`), so every `high_risk_action` and drifted "
+                  "`configuration_drift` scenario is unwinnable for the other arms regardless "
+                  "of planner quality. Cordon's rules and the dataset oracle are also two "
+                  "encodings of the same `policies.json`, so its decision-match is largely a "
+                  "correctness property of its own implementation. Use the "
+                  "**enforcement-only** row for arm-vs-arm comparison, and the outcome-based "
+                  "security metrics (which no arm is structurally favoured on) as the "
+                  "primary evidence."]
 
     lines += ["", "## Decision accuracy by category", ""]
     lines += ["| category | " + " | ".join(arms) + " |", "|---" * (len(arms) + 1) + "|"]
@@ -206,10 +299,22 @@ def render_markdown(analysis: dict) -> str:
                          f"between repetitions")
 
     if analysis["mcnemar"]:
-        lines += ["", "## McNemar exact tests (baseline vs cordon, paired runs)", ""]
+        lines += ["", "## McNemar exact tests (baseline vs cordon, scenario level)", ""]
         for fact, m in analysis["mcnemar"].items():
-            lines.append(f"- {fact}: baseline-only correct/hit {m['baseline_only']}, "
-                         f"cordon-only {m['cordon_only']}, p = {m['p_value']:.2e}")
+            note = ""
+            if m.get("degenerate"):
+                n = m["baseline_only"] + m["cordon_only"]
+                note = (f" — **one-sided discordance: p = 2^-{max(n-1,0)} is a deterministic "
+                        f"function of the {n} discordant scenarios, not a measure of evidence "
+                        f"strength. Report the effect, not this p.**")
+            lines.append(f"- {fact}: baseline-only {m['baseline_only']}, cordon-only "
+                         f"{m['cordon_only']}, of {m['n_scenarios']} scenarios; "
+                         f"p = {m['p_value']:.2e}{note}")
+        lines += ["",
+                  "Tests are computed over scenarios (majority of repetitions), not runs. "
+                  "The decision-accuracy test is restricted to the enforcement-only subset; "
+                  "testing it over all categories would compare an arm that can emit "
+                  "`requires_approval`/`reconcile` against arms that structurally cannot."]
     return "\n".join(lines) + "\n"
 
 
