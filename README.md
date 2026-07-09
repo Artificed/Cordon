@@ -55,7 +55,7 @@ python scripts/pregenerate_plans.py --model gpt-5-mini --variants core promptgua
 python -m cordon.runner --planner cached --model gpt-5-mini --plans experiments/full \
     --arms baseline prompt_guardrails cordon --reps 3 --env localstack --out experiments/full
 
-# 3. metrics (Wilson CIs, per-category, McNemar, flip-rate)
+# 3. metrics (cluster-bootstrap CIs over scenarios, per-category, McNemar, flip-rate)
 python -m cordon.analysis experiments/full/records.jsonl
 
 # ancillary studies (all replay cached plans — free)
@@ -86,7 +86,7 @@ cordon/
   arms.py           the three pipelines wired from shared components
   runner.py         scenarios x arms x reps -> resume-safe records.jsonl + manifest
   scoring.py        offline judge: record + oracle -> per-run facts
-  analysis.py       metrics with Wilson CIs, per-category tables, McNemar
+  analysis.py       metrics with cluster-bootstrap CIs (scenario = unit), McNemar
 tests/              unit + integration tests; the dataset doubles as the fixture
 ```
 
@@ -99,7 +99,12 @@ tests/              unit + integration tests; the dataset doubles as the fixture
 - [x] Experiment runner + metrics analysis (CIs, McNemar, flip-rate) + figures
 - [x] Pilot (gpt-5-mini) → prompt frozen to v2
 - [x] Full run: 240 × 3 arms × 3 reps (gpt-5-mini); guardrail ablation study
-- [~] Planner-model ladder (gpt-5-nano, gpt-5-mini, gpt-5.5)
+- [x] Planner-model ladder (gpt-5-nano, gpt-5-mini, gpt-5.5)
+- [x] Independent two-model review; claims + statistics corrected
 
-Headline (gpt-5-mini): decision accuracy 41.7% (baseline) → 75.1% (prompt-guardrails)
-→ 98.6% (Cordon); harmful-action execution 94.4% → 0%; guardrail overhead 9 ms.
+Headline (post independent review; see `../.claude-research/06_external_review.md`):
+an **ungoverned** agent executes 83–98% of harmful actions at every planner scale (98.3% nano,
+94.4% mini, 83.3% gpt-5.5); any policy layer collapses that to ~0%. On categories all arms can
+contest, a prompt enforces about as well as the control plane (94.6% vs 98.1% on mini; **tied at
+94.4% on gpt-5.5**). The control plane's distinctive value is what a prompt cannot do: stateful
+drift reconciliation (100% vs 1.7%) and graduated escalation — at 9-12 ms overhead.
