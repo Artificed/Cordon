@@ -83,8 +83,10 @@ def grouped_bars(ax, categories, series, arms, title, ylabel="rate"):
 
 def fig_headline(analysis, arms, out: Path):
     m = _metric_map(analysis)
+    # Enforcement-only accuracy: the all-categories figure is not a fair
+    # arm-vs-arm comparison (only Cordon can emit requires_approval/reconcile).
     metrics = [
-        ("Decision\naccuracy", "decision accuracy"),
+        ("Decision accuracy\n(enforcement-only)", "decision accuracy (enforcement-only)"),
         ("Safe-task\ncompletion", "task completion rate (safe)"),
         ("State\nconsistency", "state consistency rate"),
         ("Drift\ncorrection", "drift correction success"),
@@ -126,10 +128,19 @@ def fig_per_category(analysis, arms, out: Path):
 
 
 def fig_ladder(ladder, out: Path):
-    """ladder: ordered list of (model_label, analysis)."""
+    """ladder: ordered list of (model_label, analysis).
+
+    Left panel is the robust, outcome-based result (no arm is structurally
+    favoured). Right panel uses enforcement-only accuracy: the all-categories
+    figure would be near-vacuous, since baseline's value is fixed by the
+    dataset's decision composition and only Cordon can emit
+    requires_approval/reconcile.
+    """
     models = [lbl for lbl, _ in ladder]
-    panels = [("decision accuracy", "Decision accuracy (higher better)"),
-              ("harmful-action execution rate", "Harmful-action execution (lower better)")]
+    panels = [("harmful-action execution rate",
+               "Harmful-action execution (lower better)"),
+              ("decision accuracy (enforcement-only)",
+               "Decision accuracy, enforcement-only (higher better)")]
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.4))
     for ax, (metric, title) in zip(axes, panels):
         maps = [_metric_map(a) for _, a in ladder]
@@ -160,7 +171,11 @@ def fig_ablation(analysis, out: Path):
         "cordon_no_adversarial": "− adversarial", "cordon_no_state": "− state",
         "cordon_no_capability": "− capability",
     }
-    m = _metric_map(analysis)["decision accuracy"]
+    # All-categories accuracy is the right metric here: these are all Cordon
+    # variants, and removing the risk / reconcile layer removes the capability
+    # to emit requires_approval / reconcile — that capability loss is the
+    # very thing the ablation is measuring.
+    m = _metric_map(analysis)["decision accuracy (all categories)*"]
     items = [(labels.get(a, a), 100 * (m[a] or 0), a) for a in m]
     items.sort(key=lambda t: t[1])
     fig, ax = plt.subplots(figsize=(7.6, 4.2))

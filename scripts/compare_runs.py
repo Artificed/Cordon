@@ -20,25 +20,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cordon.analysis import analyze, load_records
 from cordon.dataset import load_dataset
 
+# (display name, exact metric label emitted by cordon.analysis)
+# Security metrics first: they are outcome-based and structurally fair to every
+# arm. Decision accuracy is reported enforcement-only, because baseline and
+# prompt-guardrails cannot emit requires_approval/reconcile at all.
 HEADLINE = [
-    ("decision accuracy", "decision_correct"),
-    ("harmful exec", "harmful_executed"),
-    ("policy-viol exec", "policy_violation_executed"),
-    ("unsafe invocation", "unsafe_invocation"),
-    ("blocked-safe", "safe_blocked"),
-    ("task completion", "safe_completed"),
-    ("drift correction", "drift_corrected"),
+    ("harmful exec", "harmful-action execution rate"),
+    ("policy-viol exec", "policy-violation execution rate"),
+    ("unsafe invocation", "unsafe invocation rate"),
+    ("blocked-safe", "blocked-safe-task rate"),
+    ("decision acc (enforcement-only)", "decision accuracy (enforcement-only)"),
+    ("decision acc (all cats, unfair)", "decision accuracy (all categories)*"),
+    ("task completion", "task completion rate (safe)"),
+    ("drift correction", "drift correction success"),
 ]
 ARMS = ["baseline", "prompt_guardrails", "cordon"]
 
 
 def metric_lookup(analysis: dict) -> dict:
+    """(metric label, arm) -> {rate, ci, n} for every metric row."""
     out = {}
     for row in analysis["metrics"]:
         if "label" not in row:
             continue
         for arm, v in row["values"].items():
-            out[(row["label"], arm)] = v["rate"]
+            out[(row["label"], arm)] = v
     return out
 
 
@@ -54,19 +60,9 @@ def main() -> None:
     dataset = load_dataset()
     analyses = {label: metric_lookup(analyze(load_records(path), dataset))
                 for label, path in runs}
-    # analysis.py labels: map short -> full
-    label_map = {
-        "decision_correct": "decision accuracy",
-        "harmful_executed": "harmful-action execution rate",
-        "policy_violation_executed": "policy-violation execution rate",
-        "unsafe_invocation": "unsafe invocation rate",
-        "safe_blocked": "blocked-safe-task rate",
-        "safe_completed": "task completion rate (safe)",
-        "drift_corrected": "drift correction success",
-    }
 
-    for metric_label, fact in HEADLINE:
-        print(f"\n### {metric_label}")
+    for display, metric in HEADLINE:
+        print(f"\n### {display}")
         header = f"{'run':<10}" + "".join(f"{a:>20}" for a in ARMS)
         print(header)
         print("-" * len(header))
@@ -74,9 +70,16 @@ def main() -> None:
             lut = analyses[run_label]
             cells = []
             for arm in ARMS:
-                rate = lut.get((label_map[fact], arm))
-                cells.append("n/a" if rate is None else f"{rate*100:.1f}%")
+                v = lut.get((metric, arm))
+                if v is None or v["rate"] is None:
+                    cells.append("n/a")
+                else:
+                    lo, hi = v["ci"]
+                    cells.append(f"{v['rate']*100:.1f}% [{lo*100:.0f},{hi*100:.0f}]")
             print(f"{run_label:<10}" + "".join(f"{c:>20}" for c in cells))
+    print("\nBrackets: 95% cluster-bootstrap CI, resampling scenarios (the independent unit).")
+    print("Decision accuracy over ALL categories is not a fair arm-vs-arm comparison: only")
+    print("Cordon can emit requires_approval/reconcile. Use the enforcement-only row.")
 
 
 if __name__ == "__main__":
