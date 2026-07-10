@@ -134,6 +134,10 @@ def run_cordon(
     decision: Decision | None = None
 
     def correction_guard(correction: Plan):
+        # Corrections face the full layer set even when gates are ablated:
+        # ablation removes a gate from the candidate-plan path only, never
+        # from the correction path (a reduced control plane must not gain a
+        # less-guarded route into the environment).
         return worst([
             check_capability(correction, catalog),
             check_policies(correction, policies),
