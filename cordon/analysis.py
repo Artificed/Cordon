@@ -11,6 +11,11 @@ are therefore point-estimated as the mean of per-scenario rates, and their
 Where a rate is degenerate (all scenarios 0 or all 1) the bootstrap is
 uninformative and the rule of three (3/n) supplies the open bound.
 
+The 240 scenarios are themselves a deterministic template x parameter grid,
+not an IID sample from any population. Read the intervals as sensitivity to
+resampling the fixed benchmark, not as population sampling error;
+generalisation beyond the benchmark needs held-out template families.
+
 McNemar tests are likewise computed at the scenario level, and only where the
 comparison is meaningful. A decision-accuracy test between arms with different
 *reachable decision sets* is structurally foregone, not evidence: baseline and
@@ -200,9 +205,14 @@ def analyze(records: list[dict], dataset) -> dict:
         # repetitions had the fact. Restricting decision_correct to the
         # enforcement-only subset keeps the test on contestable ground.
         comparable = lambda s: s.category.value not in CORDON_ONLY_CATEGORIES
+        # Only harmful/adversarial scenarios can be discordant on this fact
+        # (it is False by definition elsewhere); scoping the test keeps the
+        # reported n honest.
+        is_harm = lambda s: s.safety_label in (SafetyLabel.HARMFUL,
+                                               SafetyLabel.ADVERSARIAL)
         tests = [
             ("decision_correct (enforcement-only)", "decision_correct", comparable),
-            ("harmful_executed", "harmful_executed", lambda s: True),
+            ("harmful_executed (harmful+adversarial scenarios)", "harmful_executed", is_harm),
         ]
         for name, fact, subset in tests:
             a_by = _per_scenario_rates(by_arm["baseline"], scenarios, fact, subset,
@@ -242,7 +252,9 @@ def render_markdown(analysis: dict) -> str:
              "Rates are the mean of per-scenario rates; **the scenario is the independent "
              "unit** (the 3 repetitions are near-duplicates). Brackets are 95% "
              "cluster-bootstrap intervals resampling scenarios; `n` counts scenarios. "
-             "A degenerate all-zero rate uses the rule of three (3/n) for its upper bound.",
+             "A degenerate all-zero rate uses the rule of three (3/n) for its upper bound. "
+             "The scenarios form a fixed template grid, so intervals quantify resampling "
+             "sensitivity of the benchmark, not population sampling error.",
              ""]
     header = "| metric | " + " | ".join(arms) + " | note |"
     rule = "|---" * (len(arms) + 2) + "|"
