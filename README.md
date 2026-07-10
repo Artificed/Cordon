@@ -101,10 +101,14 @@ tests/              unit + integration tests; the dataset doubles as the fixture
 - [x] Full run: 240 × 3 arms × 3 reps (gpt-5-mini); guardrail ablation study
 - [x] Planner-model ladder (gpt-5-nano, gpt-5-mini, gpt-5.5)
 - [x] Independent two-model review; claims + statistics corrected
+- [x] Second independent audit (gpt-5.6); claims narrowed, overhead figure corrected
 
-Headline (post independent review; see `../.claude-research/06_external_review.md`):
-an **ungoverned** agent executes 83–98% of harmful actions at every planner scale (98.3% nano,
-94.4% mini, 83.3% gpt-5.5); any policy layer collapses that to ~0%. On categories all arms can
-contest, a prompt enforces about as well as the control plane (94.6% vs 98.1% on mini; **tied at
-94.4% on gpt-5.5**). The control plane's distinctive value is what a prompt cannot do: stateful
-drift reconciliation (100% vs 1.7%) and graduated escalation — at 9-12 ms overhead.
+Headline (post independent reviews; see `../.claude-research/06_external_review.md` and
+`../.claude-research/08_second_audit.md`): executed directly, a **policy-unaware** planner's plans
+carry out 83–98% of harmful requests at every planner scale (98.3% nano, 94.4% mini, 83.3%
+gpt-5.5); any policy layer collapses that to ~0%. On categories all arms can contest, a prompt
+enforces about as well as the control plane (94.6% vs 98.1% on mini; **tied at 94.4% on gpt-5.5**,
+both arms failing the same ten indirect-injection scenarios). The control plane's distinctive
+value is what a prompt cannot see or say: observing actual state to reconcile drift (100% vs 1.7%
+on mini) and an implemented graduated-escalation channel — the five decision layers cost ~0.1 ms
+per run (total overhead including observation I/O: 12.0–14.3 ms, 0.28–0.56% of planner latency).
