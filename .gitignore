@@ -1,5 +1,7 @@
 # secrets / local configuration
 .env
+.env.*
+!.env.example
 
 # python
 .venv/
@@ -16,3 +18,7 @@ dataset/execution_records.json
 
 # os / editor
 .DS_Store
+
+# local research notes and assistant configuration
+.claude-research/
+CLAUDE.md
